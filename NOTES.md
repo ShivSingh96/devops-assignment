@@ -7,6 +7,7 @@
 - A single `instances` map variable drives all 5 instances via `for_each`; the map key is the instance name.
 - One key pair per instance is generated with `tls_private_key` + `aws_key_pair`. Private keys are exposed only through a `sensitive` output and are never written to disk.
 - `at least one io1/io2` and `iops required for io1/io2` are enforced with variable validations.
+- Every instance has a different type, root volume type (`gp3`, `gp2`, `standard`, `io2`, `io1`), size, and key pair. These are the only five volume types that can be a boot volume (`st1`/`sc1` can't).
 
 ### Protected instance: `db`
 
@@ -50,6 +51,8 @@ Local state is a `terraform.tfstate` file on each person's machine, so each pers
 - Every hop needs both sides: a trust policy on the target role and an `sts:AssumeRole` allow on the caller. Groups can't be trust principals, so the trust policies list user/role ARNs and the groups carry the identity-side allow.
 - `roleA` is `Allow NotAction iam:*` plus an explicit `Deny iam:*`, so it cannot be widened to IAM by another policy later.
 - `group1` is CLI-only simply because no login profile is created for its users. `group2` users get a generated password (kept in state) with `password_reset_required = true`.
+- `group2` has console and CLI access in the sense that its users can sign in and use `roleA` (the real permissions live on the role, not the group). No access keys are created for them either, for the same state-leak reason as Q1; they can issue keys themselves or use `roleA` via the console.
+- The Task 4 policy is attached to the `ci` user with `aws_iam_user_policy.ci`, so `ci` can both assume `roleB` and run the CI pipeline permissions.
 
 ### Q1: Would I give `engine` and `ci` IAM users with access keys in production?
 
@@ -105,3 +108,20 @@ File: `task4-ci-policy/ci-policy.json`. The names (`app` repo, `main-cluster/app
 
 - `ecs:RegisterTaskDefinition` on `*` means CI can register any task definition. The `PassRole` restriction is what stops it using powerful roles in one.
 - This is static analysis only. I haven't run it through IAM Access Analyzer or a deploy, so a pipeline might surface a missing action (CloudTrail `AccessDenied` events show which).
+
+## Task 5: Find and Fix the Bug
+
+The corrected code is in `task5-fix/fixed.tf` (the same fix is applied in `task3-iam/account-b/main.tf`).
+
+**Bug 1: trust policy.** The principal was `arn:aws:iam::000000000000:user/roleB`. roleB is a role, not a user, so no such IAM user exists. When roleB calls `sts:AssumeRole`, its ARN is `...:role/roleB`, which doesn't match the trusted principal, so STS denies the call. Fixed by changing it to `arn:aws:iam::000000000000:role/roleB`.
+
+**Bug 2: permissions policy.** `s3:*` on `Resource = "*"` gives roleC access to every bucket in Account B. The requirement was one named bucket. I scoped `Resource` to the bucket ARN (for bucket-level actions like `ListBucket`) and `bucket/*` (for object-level actions like `GetObject` and `PutObject`).
+
+```hcl
+identifiers = ["arn:aws:iam::000000000000:role/roleB"]
+
+Resource = [
+  "arn:aws:s3:::${var.bucket_name}",
+  "arn:aws:s3:::${var.bucket_name}/*",
+]
+```
