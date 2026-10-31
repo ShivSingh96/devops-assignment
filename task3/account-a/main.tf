@@ -80,6 +80,13 @@ resource "aws_iam_group_policy" "group1" {
   policy = data.aws_iam_policy_document.group1_assume_role_b.json
 }
 
+# Task 4: the least-privilege CI policy, attached directly to the ci user
+resource "aws_iam_user_policy" "ci" {
+  name   = "ci-pipeline"
+  user   = aws_iam_user.ci.name
+  policy = file("${path.module}/../../task4-ci-policy/ci-policy.json")
+}
+
 # ---------- group2: console + CLI ----------
 
 resource "aws_iam_user" "console" {
