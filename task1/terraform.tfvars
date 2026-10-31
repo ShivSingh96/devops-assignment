@@ -15,7 +15,7 @@ instances = {
   }
   app = {
     instance_type = "t3.medium"
-    volume_type   = "gp3"
+    volume_type   = "standard" # distinct from the other four (gp3, gp2, io2, io1)
     volume_size   = 40
   }
   db = {
